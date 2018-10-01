@@ -5,11 +5,11 @@ import math
 from colorama import init, Fore, Back, Style
 from enum import Enum, auto
 import itertools
-
+import sys
 init()
 # TODO Make Tiles class
-# TODO Make deserts
-# TODO Merge islands
+# TODO Make tundra and deserts: use poles and temperature probability gradients
+# TODO Merge close islands
 
 
 def weighted_random(*choice_probs: List[Tuple[Any, float]]):
@@ -26,14 +26,17 @@ class Tile(Enum):
     SAND=auto()
     MOUNTAINS=auto()
 
+
 class Grid:
     def __init__(self, size: int):
         self.size = size
-        self.generate()
         self.islands = []
-
-    def generate(self) -> None:
         self.tiles = [[0 for x in range(self.size)] for y in range(self.size)]
+
+    def generate(self, num_islands=5, mountains=True, echo=True) -> None:
+        g.generate_islands(5)
+        g.generate_mountains()
+        g.print()
 
     def print(self) -> None:
         for row in self.tiles:
@@ -60,12 +63,12 @@ class Grid:
     def get(self, r, c) -> int:
         return self.tiles[r][c]
 
-    def generate_islands(self, num=1):
+    def generate_islands(self, num=1) -> None:
         for i in range(num):
             r, c = self.get_random_loc()
             self.islands.append(Island(r, c, self))
 
-    def generate_mountains(self):
+    def generate_mountains(self) -> None:
         # for tile in itertools.chain(*self.tiles):
         if not self.islands:
             print("[WARN] Use generate_islands() before generate_mountains()")
@@ -73,7 +76,7 @@ class Grid:
         for r, row in enumerate(self.tiles):
             for c, tile in enumerate(row):
                 if tile == 2:
-                    num_water = num_plains = 0
+                    num_ocean = num_plains = 0
                     for n in self.neighbors((r,c)):
                         r_n, c_n = n
                         if self.tiles[r_n][c_n] == Tile.OCEAN.value:
@@ -118,11 +121,22 @@ class Island:
         # Enqueue valid neighbors and turn them into Tile.PLAINS
         while self.queue:
             # REVIEW: Sigmoid
-            ocean_prob = 1/(1 + (math.e ** len(self.tiles)))
+            ocean_prob = 1 / (1 + (math.e ** -len(self.tiles)))
 
             target = self.queue.pop(0)
             self.process_neighbors(target, ocean_prob)
 
+    def __add__(self, other):
+        if self.queue or other.queue:
+            sys.exit("[ERROR] Cannot add Islands that are still generating")
+            return None
+        r_new = int((self.r + other.r)/2)
+        c_new = int((self.c + other.c)/2)
+
+        isle_new = Island(r_new, c_new, self.grid)
+        isle_new.tiles = list(set(self.tiles) + set(other.tiles))
+
+        return 
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
         r, c = coord_pair
@@ -145,10 +159,8 @@ class Island:
 
     
 if __name__ == "__main__":
-    g = Grid(50)    
-    g.generate_islands(5)
-    g.generate_mountains()
-    g.print()
+    g = Grid(50)
+    g.generate(num_islands=5, mountains=True, echo=True)
 
 
     
