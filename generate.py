@@ -7,7 +7,6 @@ from enum import Enum, auto
 import itertools
 import sys
 init()
-# TODO Make Tiles class
 # TODO Make tundra and deserts: use poles and temperature probability gradients
 # TODO Merge close islands
 
@@ -20,18 +19,27 @@ def weighted_random(*choice_probs: List[Tuple[Any, float]]):
     return random.choice(options)
 
 
-class Tile(Enum):
+class TileType(Enum):
     OCEAN=0
-    PLAINS=auto()
-    SAND=auto()
-    MOUNTAINS=auto()
+    PLAINS=1
+    SAND=2
+    MOUNTAINS=3
+
+class Tile:
+    def __init__(self, typ: TileType=TileType.OCEAN):
+        self.type = typ
+    
+    def __repr__(self) -> str:
+        return str(self.type.value)
+
+    # def set_type(self, typ: TileType):
 
 
 class Grid:
     def __init__(self, size: int):
         self.size = size
         self.islands = []
-        self.tiles = [[0 for x in range(self.size)] for y in range(self.size)]
+        self.tiles: List[Tile] = [[Tile() for x in range(self.size)] for y in range(self.size)]
 
     def generate(self, num_islands=5, mountains=True, echo=True) -> None:
         g.generate_islands(5)
@@ -41,13 +49,13 @@ class Grid:
     def print(self) -> None:
         for row in self.tiles:
             for tile in row:
-                if Tile(tile) == Tile.OCEAN:
+                if tile.type is TileType.OCEAN:
                     print(Fore.BLUE + "0" + Style.RESET_ALL, end=" ")
-                elif Tile(tile) == Tile.PLAINS:
+                elif tile.type is TileType.PLAINS:
                     print(Fore.GREEN + "1" + Style.RESET_ALL, end=" ")
-                elif Tile(tile) == Tile.SAND:
+                elif tile.type is TileType.SAND:
                     print(Fore.YELLOW + "2" + Style.RESET_ALL, end=" ") #█
-                elif Tile(tile) == Tile.MOUNTAINS:
+                elif tile.type is TileType.MOUNTAINS:
                     print(Fore.WHITE + "3" + Style.RESET_ALL, end=" ")
             print()
 
@@ -57,10 +65,10 @@ class Grid:
 
         return r, c
 
-    def set(self, r, c, value) -> None:
-        self.tiles[r][c] = value
+    def set(self, r: int, c: int, typ: TileType) -> None:
+        self.tiles[r][c].type = typ
 
-    def get(self, r, c) -> int:
+    def get(self, r: int, c: int) -> int:
         return self.tiles[r][c]
 
     def generate_islands(self, num=1) -> None:
@@ -75,13 +83,13 @@ class Grid:
             return
         for r, row in enumerate(self.tiles):
             for c, tile in enumerate(row):
-                if tile == 2:
+                if tile.type is TileType.SAND:
                     num_ocean = num_plains = 0
                     for n in self.neighbors((r,c)):
                         r_n, c_n = n
-                        if self.tiles[r_n][c_n] == Tile.OCEAN.value:
+                        if self.tiles[r_n][c_n].type is TileType.OCEAN:
                             num_ocean += 1
-                        elif self.tiles[r_n][c_n] == Tile.PLAINS.value:
+                        elif self.tiles[r_n][c_n].type is TileType.PLAINS:
                             num_plains += 1
                     # If sand is surrounded by plains, we turn it into a mountain
                     # REVIEW: What about deserts?
@@ -89,7 +97,7 @@ class Grid:
                     mountain_flag = weighted_random((True, mountain_prob), (False, 1 - mountain_prob))
 
                     if mountain_flag:
-                        self.tiles[r][c] = Tile.MOUNTAINS
+                        self.tiles[r][c].type = TileType.MOUNTAINS
 
     def neighbors(self, coord_pair):
         r, c = coord_pair
@@ -112,16 +120,17 @@ class Island:
         self.core = r, c
 
         self.queue = [self.core]
-        self.tiles = [self.core]
+        self.coords = [self.core]
         self.generate()
 
     def generate(self) -> None:
-        self.grid.set(self.core[0], self.core[1], Tile.PLAINS.value)
+        r, c = self.core
+        self.grid.set(r, c, TileType.PLAINS)
         
-        # Enqueue valid neighbors and turn them into Tile.PLAINS
+        # Enqueue valid neighbors and turn them into TileType.PLAINS
         while self.queue:
             # REVIEW: Sigmoid
-            ocean_prob = 1 / (1 + (math.e ** -len(self.tiles)))
+            ocean_prob = 1 / (1 + (math.e ** -len(self.coords)))
 
             target = self.queue.pop(0)
             self.process_neighbors(target, ocean_prob)
@@ -134,7 +143,7 @@ class Island:
         c_new = int((self.c + other.c)/2)
 
         isle_new = Island(r_new, c_new, self.grid)
-        isle_new.tiles = list(set(self.tiles) + set(other.tiles))
+        isle_new.coords = list(set(self.coords) + set(other.coords))
 
         return 
 
@@ -145,17 +154,17 @@ class Island:
         for n_coord_pair in self.grid.neighbors(coord_pair):
             r_neighbor, c_neighbor = n_coord_pair 
             # OCEAN -> PLAINS
-            if self.grid.get(r_neighbor, c_neighbor) == Tile.OCEAN.value:
-                dist_from_core = math.sqrt((r - r_neighbor) ** 2 + (c - c_neighbor) ** 2)
-                mod = STABILITY * (dist_from_core)
+            if self.grid.get(r_neighbor, c_neighbor).type is TileType.OCEAN:
+                dist_from_core = math.sqrt( (r - r_neighbor) ** 2 + (c - c_neighbor) ** 2 )
+                mod = STABILITY * dist_from_core
                 shore_flag = weighted_random((True, mod * ocean_prob), (False, 1 - (mod * ocean_prob)))
 
                 if shore_flag:
-                    self.grid.set(r_neighbor, c_neighbor, Tile.SAND.value)
+                    self.grid.set(r_neighbor, c_neighbor, TileType.SAND)
                 else:
                     self.queue.append(n_coord_pair)
-                    self.tiles.append(n_coord_pair)
-                    self.grid.set(r_neighbor, c_neighbor, Tile.PLAINS.value)
+                    self.coords.append(n_coord_pair)
+                    self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
 
     
 if __name__ == "__main__":
