@@ -63,7 +63,7 @@ class Grid:
                 elif tile.type is TileType.CORE:
                     print(Fore.RED + "4" + Style.RESET_ALL, end=" ")
                 else:
-                    print(".", end=" ")
+                    print(Fore.RED + "." + Style.RESET_ALL, end=" ")
             print()
 
     def get_random_loc(self) -> Tuple[int, int]:
@@ -86,14 +86,14 @@ class Grid:
             # Check already generated islands to see if merges possible
             for j, isle in enumerate(self.islands):
                 if isle.can_merge_with(new_isle):
-                    isle.grid.set(*isle.core, TileType.TEST)
-                    new_isle.grid.set(*new_isle.core, TileType.TEST)
-                    merged_island = isle + new_isle
-                    self.islands[j] = merged_island
+                    
+                    new_isle_core_debug = isle.merge(new_isle)
+                    # self.islands.append(merged_island)
+                    # self.islands[j] = merged_island
                     merged = True
-                    print("merged:", isle.core, new_isle.core, "->", merged_island.core)
-                    print(isle.coords)
-                    print(new_isle.coords)
+                    print("merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
+                    print([x for x in isle.coords if isinstance(x, int)])
+                    print([x for x in new_isle.coords if isinstance(x, int)])
                     print(isle.coords.intersection(new_isle.coords))
             if not merged:
                 self.islands.append(new_isle)
@@ -116,7 +116,7 @@ class Grid:
                     # If sand is surrounded by plains, we turn it into a mountain
                     # REVIEW: What about deserts?
                     # ERROR: Division by zero
-                    mountain_prob = num_plains / (num_plains + num_ocean)
+                    mountain_prob = num_plains / (num_plains + num_ocean + 0.1)
                     mountain_flag = weighted_random((True, mountain_prob), (False, 1 - mountain_prob))
 
                     if mountain_flag:
@@ -143,12 +143,14 @@ class Island:
         self.core = (r, c)
 
         self.queue = [self.core]
+        if isinstance(self.core, int):
+            print("!")
         self.coords = set(self.core)
         self.generate()
-
+    def __eq__(self, other):
+        return self.core == other.core
     def generate(self) -> None:
-        r, c = self.core
-        self.grid.set(r, c, TileType.CORE)
+        self.grid.set(*self.core, TileType.CORE)
         
         # Enqueue valid neighbors and turn them into TileType.PLAINS
         while self.queue:
@@ -158,7 +160,7 @@ class Island:
             target = self.queue.pop(0)
             self.process_neighbors(target, ocean_prob)
 
-    def __add__(self, other):
+    def merge(self, other):
         if self.queue or other.queue:
             sys.exit("[ERROR] Cannot add Islands that are still generating")
             return None
@@ -172,7 +174,26 @@ class Island:
         isle_new = Island(r_new, c_new, self.grid)
         isle_new.coords = self.coords.union(other.coords) # REVIEW
 
-        return isle_new
+        self.grid.set(*self.core, TileType.TEST)
+        other.grid.set(*other.core, TileType.TEST)
+
+
+        if self in self.grid.islands:
+            self.grid.islands.remove(self)
+        if other in other.grid.islands:
+            other.grid.islands.remove(other)
+    
+        # print("*" * 20)
+        # print(self.coords)
+        # print()
+        # print(isle_new.coords)
+        # print()
+        # print(other.coords)
+        # print("*" * 20)
+
+        # return isle_new
+        self.grid.islands.append(isle_new)
+        return isle_new.core
     
     def can_merge_with(self, other) -> bool:
         return bool(self.coords.intersection(other.coords))
@@ -193,6 +214,8 @@ class Island:
                     self.grid.set(r_neighbor, c_neighbor, TileType.SAND)
                 else:
                     self.queue.append(n_coord_pair)
+                    if not isinstance(n_coord_pair, tuple):
+                        print("[!]", n_coord_pair)
                     self.coords.add(n_coord_pair)
                     self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
 
