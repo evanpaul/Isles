@@ -8,7 +8,7 @@ import itertools
 import sys
 init()
 # TODO Make tundra and deserts: use poles and temperature probability gradients
-# TODO Merge close islands
+# TODO Fix merge connected islands: how are single numbers getting in the coords list?
 
 
 def weighted_random(*choice_probs: List[Tuple[Any, float]]):
@@ -24,6 +24,8 @@ class TileType(Enum):
     PLAINS=1
     SAND=2
     MOUNTAINS=3
+    CORE=4
+    TEST=5
 
 class Tile:
     def __init__(self, typ: TileType=TileType.OCEAN):
@@ -32,7 +34,8 @@ class Tile:
     def __repr__(self) -> str:
         return str(self.type.value)
 
-    # def set_type(self, typ: TileType):
+    def set_type(self, typ: TileType):
+        self.type = typ
 
 
 class Grid:
@@ -57,6 +60,10 @@ class Grid:
                     print(Fore.YELLOW + "2" + Style.RESET_ALL, end=" ") #█
                 elif tile.type is TileType.MOUNTAINS:
                     print(Fore.WHITE + "3" + Style.RESET_ALL, end=" ")
+                elif tile.type is TileType.CORE:
+                    print(Fore.RED + "4" + Style.RESET_ALL, end=" ")
+                else:
+                    print(".", end=" ")
             print()
 
     def get_random_loc(self) -> Tuple[int, int]:
@@ -66,15 +73,30 @@ class Grid:
         return r, c
 
     def set(self, r: int, c: int, typ: TileType) -> None:
-        self.tiles[r][c].type = typ
+        self.tiles[r][c].set_type(typ)
 
     def get(self, r: int, c: int) -> int:
         return self.tiles[r][c]
 
     def generate_islands(self, num=1) -> None:
         for i in range(num):
-            r, c = self.get_random_loc()
-            self.islands.append(Island(r, c, self))
+            # r, c = self.get_random_loc()
+            new_isle = Island(*self.get_random_loc(), self)
+            merged = False
+            # Check already generated islands to see if merges possible
+            for j, isle in enumerate(self.islands):
+                if isle.can_merge_with(new_isle):
+                    isle.grid.set(*isle.core, TileType.TEST)
+                    new_isle.grid.set(*new_isle.core, TileType.TEST)
+                    merged_island = isle + new_isle
+                    self.islands[j] = merged_island
+                    merged = True
+                    print("merged:", isle.core, new_isle.core, "->", merged_island.core)
+                    print(isle.coords)
+                    print(new_isle.coords)
+                    print(isle.coords.intersection(new_isle.coords))
+            if not merged:
+                self.islands.append(new_isle)
 
     def generate_mountains(self) -> None:
         # for tile in itertools.chain(*self.tiles):
@@ -93,11 +115,12 @@ class Grid:
                             num_plains += 1
                     # If sand is surrounded by plains, we turn it into a mountain
                     # REVIEW: What about deserts?
+                    # ERROR: Division by zero
                     mountain_prob = num_plains / (num_plains + num_ocean)
                     mountain_flag = weighted_random((True, mountain_prob), (False, 1 - mountain_prob))
 
                     if mountain_flag:
-                        self.tiles[r][c].type = TileType.MOUNTAINS
+                        self.tiles[r][c].set_type(TileType.MOUNTAINS)
 
     def neighbors(self, coord_pair):
         r, c = coord_pair
@@ -117,15 +140,15 @@ class Island:
     # TODO Play around with different models
     def __init__(self, r: int, c: int, grid: Grid):
         self.grid = grid
-        self.core = r, c
+        self.core = (r, c)
 
         self.queue = [self.core]
-        self.coords = [self.core]
+        self.coords = set(self.core)
         self.generate()
 
     def generate(self) -> None:
         r, c = self.core
-        self.grid.set(r, c, TileType.PLAINS)
+        self.grid.set(r, c, TileType.CORE)
         
         # Enqueue valid neighbors and turn them into TileType.PLAINS
         while self.queue:
@@ -139,13 +162,20 @@ class Island:
         if self.queue or other.queue:
             sys.exit("[ERROR] Cannot add Islands that are still generating")
             return None
-        r_new = int((self.r + other.r)/2)
-        c_new = int((self.c + other.c)/2)
+        # REVIEW: error out?
+        if not self.can_merge_with(other):
+            print("[WARNING] Islands are not connected!")
+
+        r_new = int( (self.core[0] + other.core[0]) / 2 )
+        c_new = int( (self.core[1] + other.core[1]) / 2 )
 
         isle_new = Island(r_new, c_new, self.grid)
-        isle_new.coords = list(set(self.coords) + set(other.coords))
+        isle_new.coords = self.coords.union(other.coords) # REVIEW
 
-        return 
+        return isle_new
+    
+    def can_merge_with(self, other) -> bool:
+        return bool(self.coords.intersection(other.coords))
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
         r, c = coord_pair
@@ -163,7 +193,7 @@ class Island:
                     self.grid.set(r_neighbor, c_neighbor, TileType.SAND)
                 else:
                     self.queue.append(n_coord_pair)
-                    self.coords.append(n_coord_pair)
+                    self.coords.add(n_coord_pair)
                     self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
 
     
