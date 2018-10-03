@@ -50,7 +50,12 @@ class Grid:
         g.print()
 
     def print(self) -> None:
-        for row in self.tiles:
+        print("\t", end="")
+        for c in range(self.size):
+            print(hex(c)[2], end=" ")
+        print()
+        for r, row in enumerate(self.tiles):
+            print(hex(r)[2], end="\t")
             for tile in row:
                 if tile.type is TileType.OCEAN:
                     print(Fore.BLUE + "0" + Style.RESET_ALL, end=" ")
@@ -138,18 +143,26 @@ class Grid:
 
 class Island:
     # TODO Play around with different models
-    def __init__(self, r: int, c: int, grid: Grid):
+    def __init__(self, r: int, c: int, grid: Grid, generateFlag=True):
+        self.generated = False
         self.grid = grid
         self.core = (r, c)
-
-        self.queue = [self.core]
+        
         if isinstance(self.core, int):
-            print("!")
+            print("ERROR IN INITIALIZATION")
         self.coords = set(self.core)
-        self.generate()
+
+        if generateFlag:
+            self.queue = [self.core]
+            self.generate()
+        else:
+            self.queue = []
+
     def __eq__(self, other):
         return self.core == other.core
     def generate(self) -> None:
+        if self.generated:
+            sys.exit("[ERROR] Island already generated")
         self.grid.set(*self.core, TileType.CORE)
         
         # Enqueue valid neighbors and turn them into TileType.PLAINS
@@ -160,9 +173,14 @@ class Island:
             target = self.queue.pop(0)
             self.process_neighbors(target, ocean_prob)
 
+        self.generated = True
+
     def merge(self, other):
-        if self.queue or other.queue:
-            sys.exit("[ERROR] Cannot add Islands that are still generating")
+        if self.queue or other.queue: # REVIEW: Encountered this error...
+            print("[ERROR] Cannot add Islands that are still generating")
+            print(self.queue)
+            print(other.queue)
+            # sys.exit()
             return None
         # REVIEW: error out?
         if not self.can_merge_with(other):
@@ -171,27 +189,29 @@ class Island:
         r_new = int( (self.core[0] + other.core[0]) / 2 )
         c_new = int( (self.core[1] + other.core[1]) / 2 )
 
-        isle_new = Island(r_new, c_new, self.grid)
-        isle_new.coords = self.coords.union(other.coords) # REVIEW
+        isle_new = Island(r_new, c_new, self.grid, generateFlag=False)
+        coords_new = self.coords.union(other.coords)
+        # DEBUG
+        for c in list(coords_new):
+            if isinstance(c, int):
+                print("ERROR IN MERGE()")
+
+        print([x for x in self.coords if isinstance(x, int)])
+        print([x for x in other.coords if isinstance(x, int)])
+        print(self.coords.intersection(other.coords))
+
+        isle_new.coords = coords_new
 
         self.grid.set(*self.core, TileType.TEST)
         other.grid.set(*other.core, TileType.TEST)
+        self.grid.set(r_new, c_new, TileType.CORE)
 
 
         if self in self.grid.islands:
             self.grid.islands.remove(self)
         if other in other.grid.islands:
             other.grid.islands.remove(other)
-    
-        # print("*" * 20)
-        # print(self.coords)
-        # print()
-        # print(isle_new.coords)
-        # print()
-        # print(other.coords)
-        # print("*" * 20)
-
-        # return isle_new
+            
         self.grid.islands.append(isle_new)
         return isle_new.core
     
@@ -215,14 +235,14 @@ class Island:
                 else:
                     self.queue.append(n_coord_pair)
                     if not isinstance(n_coord_pair, tuple):
-                        print("[!]", n_coord_pair)
+                        print("ERROR IN PROCESS_NEIGHBORS()", n_coord_pair)
                     self.coords.add(n_coord_pair)
                     self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
 
     
 if __name__ == "__main__":
-    g = Grid(50)
-    g.generate(num_islands=5, mountains=True, echo=True)
+    g = Grid(16)
+    g.generate(num_islands=2, mountains=True, echo=True)
 
 
     
