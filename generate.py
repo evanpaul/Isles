@@ -9,7 +9,7 @@ import sys
 init()
 # TODO Make tundra and deserts: use poles and temperature probability gradients
 # TODO Fix merge connected islands: how are single numbers getting in the coords list?
-
+    # color each island one color 
 
 def weighted_random(*choice_probs: List[Tuple[Any, float]]):
     options = []
@@ -50,12 +50,12 @@ class Grid:
         g.print()
 
     def print(self) -> None:
-        print("\t", end="")
+        print("   ", end="")
         for c in range(self.size):
             print(hex(c)[2], end=" ")
         print()
         for r, row in enumerate(self.tiles):
-            print(hex(r)[2], end="\t")
+            print(hex(r)[2], end="  ")
             for tile in row:
                 if tile.type is TileType.OCEAN:
                     print(Fore.BLUE + "0" + Style.RESET_ALL, end=" ")
@@ -208,7 +208,7 @@ class Island:
         # Need to check neighbors
         # Perhaps reconsider how grid is represented
         # Add boolean bitmap?
-        # Graph?
+        # Graph
         return bool(self.coords.intersection(other.coords))
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
