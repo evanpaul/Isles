@@ -28,8 +28,11 @@ class TileType(Enum):
     TEST=5
 
 class Tile:
-    def __init__(self, typ: TileType=TileType.OCEAN):
+    def __init__(self, r, c, typ: TileType=TileType.OCEAN, isle=None):
         self.type = typ
+        self.island = isle
+        self.coord = r, c
+        self.is_core = False
     
     def __repr__(self) -> str:
         return str(self.type.value)
@@ -37,25 +40,32 @@ class Tile:
     def set_type(self, typ: TileType):
         self.type = typ
 
+    def set_island(self, isle):
+        self.island = isle
+
 
 class Grid:
     def __init__(self, size: int):
         self.size = size
         self.islands = []
-        self.tiles: List[Tile] = [[Tile() for x in range(self.size)] for y in range(self.size)]
+        # REVIEW: y,x or x,y?
+        self.tiles: List[Tile] = [[Tile(y, x) for x in range(self.size)] for y in range(self.size)]
 
     def generate(self, num_islands=5, mountains=True, echo=True) -> None:
-        g.generate_islands(5)
+        g.generate_islands(num_islands)
         g.generate_mountains()
+        g.print()
+        input()
+        g.debug_label_islands()
         g.print()
 
     def print(self) -> None:
-        print("   ", end="")
-        for c in range(self.size):
-            print(hex(c)[2], end=" ")
-        print()
+        # print("   ", end="")
+        # for c in range(self.size):
+        #     print(hex(c)[2], end=" ")
+        # print()
         for r, row in enumerate(self.tiles):
-            print(hex(r)[2], end="  ")
+            # print(hex(r)[2], end="  ")
             for tile in row:
                 if tile.type is TileType.OCEAN:
                     print(Fore.BLUE + "0" + Style.RESET_ALL, end=" ")
@@ -84,9 +94,11 @@ class Grid:
         return self.tiles[r][c]
 
     def generate_islands(self, num=1) -> None:
+        print("[DEBUG] Generating %d islands" % num)
         for i in range(num):
     
             # r, c = self.get_random_loc()
+            print("i:", i)
             new_isle = Island(*self.get_random_loc(), self)
             merged = False
             # Check already generated islands to see if merges possible
@@ -98,6 +110,7 @@ class Grid:
                     new_isle_core_debug = isle.merge(new_isle)
                     merged = True
                     print("merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
+                    print(isle.num,"+", new_isle.num)
                     print(isle.coords.intersection(new_isle.coords))
             if not merged:
                 self.islands.append(new_isle)
@@ -140,13 +153,31 @@ class Grid:
             if 0 <= r_n < self.size and 0 <= c_n < self.size:
                 yield n_coord_pair
 
+    def debug_label_islands(self):
+        for row in self.tiles:
+            for t in row:
+                if t.type.value == 0:
+                    pass
+                elif t.island is None:
+                    print("****")
+                    print("NONE")
+                    print(hex(t.coord[0])[2], hex(t.coord[1])[2], t)
+                elif t.is_core:
+                    pass
+                else:
+                    t.set_type(TileType(t.island.num + 1))
 
 class Island:
     # TODO Play around with different models
+    num = 0 # DEBUG, DO NOT USE
     def __init__(self, r: int, c: int, grid: Grid, generateFlag=True):
+        self.num = Island.num
+        Island.num +=1
         self.generated = False
         self.grid = grid
         self.core = (r, c)
+        self.grid.get(r, c).set_island(self)
+        self.grid.get(r, c).is_core = True
         self.coords = {self.core}
         self.queue = []
 
@@ -190,7 +221,9 @@ class Island:
 
         # Set tiles
         self.grid.set(*self.core, TileType.TEST)
+        self.grid.get(*self.core).is_core = False
         other.grid.set(*other.core, TileType.TEST)
+        other.grid.get(*other.core).is_core = False
         self.grid.set(r_new, c_new, TileType.CORE)
 
         # Reomve old island references so only merged remains
@@ -232,6 +265,8 @@ class Island:
                     self.queue.append(n_coord_pair)
                     self.coords.add(n_coord_pair)
                     self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
+                self.coords.add(n_coord_pair)
+                self.grid.get(*n_coord_pair).set_island(self)
 
     
 if __name__ == "__main__":
