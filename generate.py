@@ -7,11 +7,14 @@ from enum import Enum, auto
 import itertools
 import sys
 init()
-# TODO Make tundra and deserts: use poles and temperature probability gradients
 # TODO Fix merge connected islands: how are single numbers getting in the coords list?
     # color each island one color 
+# REVIEW Having both islands.coords and grid.tiles is a bit clunky
+    # Grid.tiles is cleaner, but you have to search more
+# TODO Make tundra and deserts: use poles and temperature probability gradients
 
 def weighted_random(*choice_probs: List[Tuple[Any, float]]):
+    '''Weighted randomly choose an item from a list given respective probabilities'''
     options = []
     for choice, prob in choice_probs:
         options += [choice] * int(prob * 100)
@@ -26,6 +29,7 @@ class TileType(Enum):
     MOUNTAINS=3
     CORE=4
     TEST=5
+
 
 class Tile:
     def __init__(self, r, c, typ: TileType=TileType.OCEAN, isle=None):
@@ -53,11 +57,13 @@ class Grid:
 
     def generate(self, num_islands=5, mountains=True, echo=True) -> None:
         g.generate_islands(num_islands)
-        g.generate_mountains()
-        g.print()
-        input()
-        g.debug_label_islands()
-        g.print()
+        if mountains:
+            g.generate_mountains()
+        if echo:
+            g.print()
+            input()
+            g.debug_label_islands()
+            g.print()
 
     def print(self) -> None:
         # print("   ", end="")
@@ -82,44 +88,42 @@ class Grid:
             print()
 
     def get_random_loc(self) -> Tuple[int, int]:
+        '''Get a random coordinate from the grid
+        
+        #REVIEW Perhaps make a wrapper function that only gets random ocean tiles? 
+        '''
         r = random.randrange(0, self.size)
         c = random.randrange(0, self.size)
 
         return r, c
 
     def set(self, r: int, c: int, typ: TileType) -> None:
+        #REVIEW Clunky. Should the grid wrap all tile accesses or none?
+        #REVIEW self.get_tile(...).set(...)
         self.tiles[r][c].set_type(typ)
 
-    def get(self, r: int, c: int) -> int:
+    def get_tile(self, r: int, c: int) -> int:
         return self.tiles[r][c]
 
     def generate_islands(self, num=1) -> None:
         print("[DEBUG] Generating %d islands" % num)
-        for i in range(num):
-    
-            # r, c = self.get_random_loc()
-            print("i:", i)
+        for _ in range(num):
             new_isle = Island(*self.get_random_loc(), self)
             merged = False
             # Check already generated islands to see if merges possible
-            for j, isle in enumerate(self.islands):
+            for isle in self.islands:
                 if isle.can_merge_with(new_isle):
-                    # print("Merging:", i, j)
-                    # print(isle.coords)
-                    # print(new_isle.coords)
                     new_isle_core_debug = isle.merge(new_isle)
                     merged = True
-                    print("merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
-                    print(isle.num,"+", new_isle.num)
-                    print(isle.coords.intersection(new_isle.coords))
+                    print("[DEBUG] Merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
             if not merged:
                 self.islands.append(new_isle)
 
     def generate_mountains(self) -> None:
-        # for tile in itertools.chain(*self.tiles):
         if not self.islands:
             print("[WARN] Use generate_islands() before generate_mountains()")
             return
+
         for r, row in enumerate(self.tiles):
             for c, tile in enumerate(row):
                 # Count ocean and plains to calculate odds of generating mountains
@@ -141,43 +145,39 @@ class Grid:
                         self.tiles[r][c].set_type(TileType.MOUNTAINS)
 
     def neighbors(self, coord_pair):
+        '''Generate valid grid neighbors from given coord_pair
+        
+        # REVIEW: Should this remain agnostic to TileType?
+        '''
         r, c = coord_pair
-        neighbs = [(r + 1, c),
-                    (r - 1, c),
-                    (r, c - 1),
-                    (r, c + 1)]
+        neighbors_coords = [(r + 1, c),
+                            (r - 1, c),
+                            (r, c - 1),
+                            (r, c + 1)]
 
-        for n_coord_pair in neighbs:
+        for n_coord_pair in neighbors_coords:
             # Check bounds
             r_n, c_n = n_coord_pair
             if 0 <= r_n < self.size and 0 <= c_n < self.size:
                 yield n_coord_pair
 
     def debug_label_islands(self):
-        for row in self.tiles:
-            for t in row:
-                if t.type.value == 0:
-                    pass
-                elif t.island is None:
-                    print("****")
-                    print("NONE")
-                    print(hex(t.coord[0])[2], hex(t.coord[1])[2], t)
-                elif t.is_core:
-                    pass
-                else:
-                    t.set_type(TileType(t.island.num + 1))
+        '''Label islands for clearer view of generation
+        
+        This SOMETIMES generates cool 'territories', but not always
+        '''
+        for t in itertools.chain(*self.tiles):
+            if t.island is not None and t.type is not TileType.OCEAN and not t.is_core:
+                t.set_type(TileType(self.islands.index(t.island) + 1))
 
 class Island:
     # TODO Play around with different models
-    num = 0 # DEBUG, DO NOT USE
     def __init__(self, r: int, c: int, grid: Grid, generateFlag=True):
-        self.num = Island.num
-        Island.num +=1
         self.generated = False
         self.grid = grid
         self.core = (r, c)
-        self.grid.get(r, c).set_island(self)
-        self.grid.get(r, c).is_core = True
+        self.grid.get_tile(r, c).set_island(self)
+        self.grid.get_tile(r, c).is_core = True
         self.coords = {self.core}
         self.queue = []
 
@@ -196,12 +196,11 @@ class Island:
         # Enqueue valid neighbors and turn them into TileType.PLAINS
         while self.queue:
             # REVIEW: Sigmoid
-            ocean_prob = 1 / (1 + (math.e ** -len(self.coords)))
-
+            ocean_prob = 1 / (1 + (math.e ** - len(self.coords)))
             target = self.queue.pop(0)
             self.process_neighbors(target, ocean_prob)
 
-        self.generated = True
+        self.generated = True # Not particularly useful, just for debug
 
     def merge(self, other):
         if self.queue or other.queue:
@@ -209,7 +208,7 @@ class Island:
             return None
         # REVIEW: error out?
         if not self.can_merge_with(other):
-            print("[WARNING] Islands are not connected!")
+            print("[WARNING] Merged islands are not connected!")
 
         # Use midpoint as new core
         r_new = int( (self.core[0] + other.core[0]) / 2 )
@@ -218,12 +217,15 @@ class Island:
         isle_new = Island(r_new, c_new, self.grid, generateFlag=False)
         coords_new = self.coords.union(other.coords)
         isle_new.coords = coords_new
+        # Update island reference for all new coords (not needed for every coord, but some)
+        for coord_pair in isle_new.coords: # SO CLUNKY 
+            self.grid.get_tile(*coord_pair).island = isle_new
 
         # Set tiles
         self.grid.set(*self.core, TileType.TEST)
-        self.grid.get(*self.core).is_core = False
+        self.grid.get_tile(*self.core).is_core = False
         other.grid.set(*other.core, TileType.TEST)
-        other.grid.get(*other.core).is_core = False
+        other.grid.get_tile(*other.core).is_core = False
         self.grid.set(r_new, c_new, TileType.CORE)
 
         # Reomve old island references so only merged remains
@@ -236,15 +238,15 @@ class Island:
         return isle_new.core
     
     def can_merge_with(self, other) -> bool:
-        # This logic needs to be reworked
-        # Essentially there may not be an intersection
-        # Need to check neighbors
-        # Perhaps reconsider how grid is represented
-        # Add boolean bitmap?
-        # Graph
+        ''' Test if two Islands are able to be merged together
+
+        This logic needs to be reworked. There may not be an intersection
+        Need to check neighbors. Perhaps reconsider how grid is represented
+        '''
         return bool(self.coords.intersection(other.coords))
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
+        ''' Go through neighbors of coord_pair and generate tiles'''
         r, c = coord_pair
         # REVIEW: Too low and the whole map fills. Too high and you get diamonds
         STABILITY = 0.45 
@@ -252,7 +254,7 @@ class Island:
         for n_coord_pair in self.grid.neighbors(coord_pair):
             r_neighbor, c_neighbor = n_coord_pair 
             # OCEAN -> PLAINS
-            if self.grid.get(r_neighbor, c_neighbor).type is TileType.OCEAN:
+            if self.grid.get_tile(r_neighbor, c_neighbor).type is TileType.OCEAN:
                 # Calculate distance from core to determine probability of 
                 # generating edge of island (i.e. shoreline)
                 dist_from_core = math.sqrt( (r - r_neighbor) ** 2 + (c - c_neighbor) ** 2 )
@@ -266,12 +268,12 @@ class Island:
                     self.coords.add(n_coord_pair)
                     self.grid.set(r_neighbor, c_neighbor, TileType.PLAINS)
                 self.coords.add(n_coord_pair)
-                self.grid.get(*n_coord_pair).set_island(self)
+                self.grid.get_tile(*n_coord_pair).set_island(self)
 
     
 if __name__ == "__main__":
-    g = Grid(16)
-    g.generate(num_islands=2, mountains=True, echo=True)
+    g = Grid(50)
+    g.generate(num_islands=3, mountains=True, echo=True)
 
 
     
