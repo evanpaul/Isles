@@ -29,6 +29,7 @@ class TileType(Enum):
     MOUNTAINS=3
     CORE=4
     TEST=5
+    DEBUG=6
 
 
 class Tile:
@@ -82,9 +83,13 @@ class Grid:
                 elif tile.type is TileType.MOUNTAINS:
                     print(Fore.WHITE + "3" + Style.RESET_ALL, end=" ")
                 elif tile.type is TileType.CORE:
-                    print(Fore.RED + "4" + Style.RESET_ALL, end=" ")
-                else:
+                    print(Fore.RED + "C" + Style.RESET_ALL, end=" ")
+                elif tile.type is TileType.TEST:
                     print(Fore.RED + "." + Style.RESET_ALL, end=" ")
+                elif tile.type is TileType.DEBUG:
+                    print(Fore.BLACK + "&" + Style.RESET_ALL, end=" ")
+
+
             print()
 
     def get_random_loc(self) -> Tuple[int, int]:
@@ -109,15 +114,19 @@ class Grid:
         print("[DEBUG] Generating %d islands" % num)
         for _ in range(num):
             new_isle = Island(*self.get_random_loc(), self)
-            merged = False
+            self.islands.append(new_isle)
+            # merged = False
             # Check already generated islands to see if merges possible
+            # REVIEW Modifying list in for block is probably the issue here 
             for isle in self.islands:
                 if isle.can_merge_with(new_isle):
                     new_isle_core_debug = isle.merge(new_isle)
-                    merged = True
+                    # merged = True
                     print("[DEBUG] Merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
-            if not merged:
-                self.islands.append(new_isle)
+                    print(self.islands)
+
+            # if not merged:
+            #     self.islands.append(new_isle)
 
     def generate_mountains(self) -> None:
         if not self.islands:
@@ -167,9 +176,21 @@ class Grid:
         This SOMETIMES generates cool 'territories', but not always
         '''
         for t in itertools.chain(*self.tiles):
-            if t.island is not None and t.type is not TileType.OCEAN and not t.is_core:
+            if t.island and t.island not in self.islands:
+                print("[ERROR] t.island is not in list")
+                t.island.print()
+                print("----")
+                for si in self.islands:
+                    si.print()
+                for j in self.neighbors(t.coord):
+                    self.get_tile(*j).set_type(TileType.DEBUG)
+                self.print()
+                # sys.exit()
+            elif t.island and t.type is not TileType.OCEAN and not t.is_core:
                 t.set_type(TileType(self.islands.index(t.island) + 1))
-
+                #ValueError: <__main__.Island object at 0x10abfa128> is not in list
+            # elif not t.island:
+            #     print("?")
 class Island:
     # TODO Play around with different models
     def __init__(self, r: int, c: int, grid: Grid, generateFlag=True):
@@ -188,6 +209,9 @@ class Island:
     def __eq__(self, other):
         return self.core == other.core
 
+    def print(self):
+        print("core:", self.core)
+
     def generate(self) -> None:
         if self.generated:
             sys.exit("[ERROR] Island already generated")
@@ -203,6 +227,9 @@ class Island:
         self.generated = True # Not particularly useful, just for debug
 
     def merge(self, other):
+        assert(self.grid is other.grid)
+        g = self.grid
+        
         if self.queue or other.queue:
             print("[ERROR] Cannot add Islands that are still generating")
             return None
@@ -210,31 +237,55 @@ class Island:
         if not self.can_merge_with(other):
             print("[WARNING] Merged islands are not connected!")
 
+        print("[DEBUG: MERGE START]{")
+        print(self, end=" "); self.print()
+        print(other, end=" "); other.print()
+        print(g.islands)
+        print("}")
+        
         # Use midpoint as new core
+        # TODO: Ensure it can't be an ocean tile
         r_new = int( (self.core[0] + other.core[0]) / 2 )
         c_new = int( (self.core[1] + other.core[1]) / 2 )
-
-        isle_new = Island(r_new, c_new, self.grid, generateFlag=False)
+        # Create new island and assign it the intersection of self and other
+        isle_new = Island(r_new, c_new, g, generateFlag=False)
         coords_new = self.coords.union(other.coords)
         isle_new.coords = coords_new
         # Update island reference for all new coords (not needed for every coord, but some)
         for coord_pair in isle_new.coords: # SO CLUNKY 
-            self.grid.get_tile(*coord_pair).island = isle_new
+            g.get_tile(*coord_pair).island = isle_new
 
         # Set tiles
-        self.grid.set(*self.core, TileType.TEST)
-        self.grid.get_tile(*self.core).is_core = False
-        other.grid.set(*other.core, TileType.TEST)
-        other.grid.get_tile(*other.core).is_core = False
-        self.grid.set(r_new, c_new, TileType.CORE)
+        g.set(*self.core, TileType.TEST)
+        g.get_tile(*self.core).is_core = False
 
-        # Reomve old island references so only merged remains
-        if self in self.grid.islands:
-            self.grid.islands.remove(self)
-        if other in other.grid.islands:
-            other.grid.islands.remove(other)
+        g.set(*other.core, TileType.TEST)
+        g.get_tile(*other.core).is_core = False
+
+        g.set(r_new, c_new, TileType.CORE)
+
+
+
+        # Remove old island references so only merged remains
+        if self in g.islands:
+            g.islands.remove(self)
+        else:
+            print("um?")
+        if other in g.islands:
+            g.islands.remove(other)
+        else:
+            print("UM?")
             
-        self.grid.islands.append(isle_new)
+        g.islands.append(isle_new)
+
+
+        print("[DEBUG: MERGE END]{")
+        print(self, end=" "); self.print()
+        print(other, end=" "); other.print()
+        print(isle_new, end=" "); isle_new.print()
+        print(g.islands)
+        print("}")
+
         return isle_new.core
     
     def can_merge_with(self, other) -> bool:
@@ -243,7 +294,29 @@ class Island:
         This logic needs to be reworked. There may not be an intersection
         Need to check neighbors. Perhaps reconsider how grid is represented
         '''
-        return bool(self.coords.intersection(other.coords))
+        if self == other:
+            print("[WARNING] Cannot merge an island with itself")
+            print(self.core); print(other.core)
+            return False
+        intersects = bool(self.coords.intersection(other.coords))
+        if intersects: # simple case
+            print('[DEBUG] Simple case')
+            return True
+
+        mergeable = False
+        for c in self.coords: # Sick Big-O yo
+            for n in self.grid.neighbors(c):
+                for d in other.coords:
+                        if n == d:
+                            print('[DEBUG] Neighbors case')
+                            return True
+        for p in other.coords:
+            for n in other.grid.neighbors(p):
+                for q in self.coords:
+                        if q == p:
+                            print('[DEBUG] Neighbors case 2')
+                            return True
+        return False
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
         ''' Go through neighbors of coord_pair and generate tiles'''
@@ -272,9 +345,10 @@ class Island:
 
     
 if __name__ == "__main__":
-    g = Grid(50)
-    g.generate(num_islands=3, mountains=True, echo=True)
-
+    while True:
+        g = Grid(50)
+        g.generate(num_islands=4, mountains=True, echo=True)
+        input()
 
     
 
