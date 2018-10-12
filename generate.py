@@ -71,7 +71,7 @@ class Tile:
 class Grid:
     def __init__(self, size: int) -> None:
         self.size = size
-        self.islands: Dict[Island, Set[Tuple[int, int]]] = {} 
+        self.islands: DefaultDict[Island, Set[Tuple[int, int]]] = defaultdict(set) 
         # REVIEW: y,x or x,y?
         self.tiles: List[List[Tile]] = [[Tile((r, c)) for c in range(self.size)] for r in range(self.size)]
 
@@ -92,6 +92,13 @@ class Grid:
             counter[t.island] += 1
         pprint(dict(counter))
 
+
+    def tally2(self):
+        counter = {}
+        for isle in self.islands:
+            counter[isle] = len(self.islands[isle])
+        pprint(counter)
+
     def print(self) -> None:
         display_scheme = {
             TileType.OCEAN.value: (Fore.BLUE, "0"),
@@ -105,7 +112,6 @@ class Grid:
             8: (Fore.CYAN, "?"),
             9: (Fore.CYAN, "?")
         }
-        # self.tally()
 
         for row in self.tiles:
             for tile in row:
@@ -115,15 +121,19 @@ class Grid:
                 print(scheme[0] + scheme[1] + Style.RESET_ALL, end=" ")
             print()
 
-    def get_random_loc(self) -> Tuple[int, int]:
+    def get_random_loc(self, ocean=True) -> Tuple[int, int]:
         '''Get a random coordinate from the grid
         
         # REVIEW Perhaps make a wrapper function that only gets random ocean tiles? 
         '''
-        r = random.randrange(0, self.size)
-        c = random.randrange(0, self.size)
+        not_valid = True
+        while not_valid:
+            r = random.randrange(0, self.size)
+            c = random.randrange(0, self.size)
+            tile = self.get_tile((r,c))
 
-        return r, c
+            if tile.type is TileType.OCEAN:
+                return r, c
 
     def set(self, coords: Tuple[int, int], typ: TileType) -> None:
         #REVIEW self.get_tile(...).set(...), clunky
@@ -133,36 +143,63 @@ class Grid:
     def get_tile(self, coords: Tuple[int, int]) -> Tile:
         r, c = coords
         return self.tiles[r][c]
-    
 
     def generate_islands(self, num=1) -> None:
         print("[DEBUG] Generating %d islands" % num)
         for _ in range(num):
-            new_isle = Island(self.get_random_loc(), self)
-            print("!" * 10)
-            pprint(self.islands)
-            self.islands[new_isle] = set()
-            print("-" * 10)
-            pprint(self.islands)
-            print("!" * 10)
-            # merged = False
+            Island(self.get_random_loc(), self)
+
             # Check already generated islands to see if merges possible
             # REVIEW Modifying list in for block is probably the issue here
             i = 0
-            print("*" * 10)
-            pprint(self.islands)
-            self.tally()
-            
-            for isle in self.islands:
-                # print(isle,":", len(self.islands[isle]))
+            # print("*" * 10)
+            # pprint(self.islands)
+            # self.tally()
+            self.merge_islands()
+            # print("*" * 10)
 
-                if isle.can_merge_with(new_isle):
-                    new_isle_core_debug = isle.merge(new_isle)
-                    # merged = True
-                    print("[DEBUG] Merged:", isle.core, new_isle.core, "->", new_isle_core_debug)
-                    print(self.islands)
-                i += 1
-            print("*" * 10)
+    def merge_islands(self):
+        processed: Dict[Island, bool] = {isle: False for isle in self.islands}
+        merge_queue = list(itertools.combinations(self.islands, 2))
+        merged = []
+        for isle1, isle2 in merge_queue:
+            valid_merge = not processed[isle1] and not processed[isle2]
+            if isle1.can_merge_with(isle2) and valid_merge:
+                new_isle, union = isle1.merge(isle2)
+                merged.append( (isle1, isle2, new_isle, union) )
+                print("[DEBUG] Merged: %s(%d,%d) + %s(%d,%d) -> %s(%d,%d)" % (
+                    isle1, *isle1.core, 
+                    isle2, *isle2.core,
+                    new_isle, *new_isle.core)
+                )
+                processed[isle1] = processed[isle2] = True
+
+        
+        if merged:
+            print("[DEBUG] Finalizing merge")
+        for quartet in merged:
+            isl1, isl2, isl_new, union = quartet
+
+            for coord_pair in union:
+                self.get_tile(coord_pair).set_island(isl_new)
+            self.islands[isl_new] = union
+            isl_new.setup_core()
+
+            self.set(isl1.core, TileType.TEST)
+            self.get_tile(isl1.core).is_core = False
+            del self.islands[isl1]
+
+            self.set(isl2.core, TileType.TEST)
+            self.get_tile(isl2.core).is_core = False
+            del self.islands[isl2]
+
+            
+        print("*" * 20)
+        self.tally()
+        print("." * 20)
+        self.tally2()
+        print("*" * 20)
+
 
     def generate_mountains(self) -> None:
         if not self.islands:
@@ -216,7 +253,7 @@ class Grid:
             if t.island and t.island not in self.islands:
                 print("[ERROR] t.island is not in list")
                 t.island.print()
-                print("----")
+                print("=")
                 sys.exit()
                 for si in self.islands:
                     si.print()
@@ -231,22 +268,20 @@ class Grid:
                 #ValueError: <__main__.Island object at 0x10abfa128> is not in list
             # elif not t.island:
             #     print("?")
+
+
 class Island:
     # TODO Play around with different models
     def __init__(self, core: Tuple[int, int], grid: Grid, generateFlag=True) -> None:
-        self.id = uuid.uuid4().hex
         r, c = core
-
+        self.id = uuid.uuid4().hex
         self.generated = False
         self.grid = grid
         self.core = core
-        self.grid.get_tile((r, c)).set_island(self)
-        self.grid.get_tile((r, c)).is_core = True
-        self.grid.islands[self] = {core}
         self.queue: List[Tuple[int, int]] = []
+        self.generateFlag = generateFlag
 
-        if generateFlag:
-            self.queue.append(self.core)
+        if self.generateFlag:
             self.generate()
 
     def __eq__(self, other):
@@ -258,10 +293,18 @@ class Island:
     def print(self):
         print("core:", self.core)
 
+    def setup_core(self):
+        self.grid.get_tile(self.core).set_island(self)
+        self.grid.get_tile(self.core).is_core = True
+        self.grid.set(self.core, TileType.CORE)
+        self.grid.islands[self].add(self.core)
+
     def generate(self) -> None:
         if self.generated:
             sys.exit("[ERROR] Island already generated")
-        self.grid.set(self.core, TileType.CORE)
+
+        self.setup_core()
+        self.queue.append(self.core)
         
         # Enqueue valid neighbors and turn them into TileType.PLAINS
         while self.queue:
@@ -271,101 +314,9 @@ class Island:
             self.process_neighbors(target, ocean_prob)
 
         self.generated = True # Not particularly useful, just for debug
-        print("[DEBUG] Generation of [%s] complete:" % str(self))
+        print("[DEBUG] Generation of %s(%d, %d) complete:" % (str(self), *self.core))
         print("[DEBUG] => %d tiles" % len(self.grid.islands[self]))
-        # pprint(self.grid.islands)
-
-    def merge(self, other):
-        assert(self.grid is other.grid)
-        g = self.grid
-        isles = g.islands
-        
-        if self.queue or other.queue:
-            print("[ERROR] Cannot add Islands that are still generating")
-            return None
-        # REVIEW: error out?
-        # if not self.can_merge_with(other):
-        #     print("[WARNING] Merged islands are not connected!")
-
-        print("[DEBUG: MERGE START]{")
-        print(self, end=" "); self.print()
-        print(other, end=" "); other.print()
-        print(isles)
-        print("}")
-
-        print("[DEBUG: MERGE COUNT BEFORE]")
-        g.tally()
-        # Use midpoint as new core
-        # TODO: Ensure it can't be an ocean tile
-        r_new = int( (self.core[0] + other.core[0]) / 2 )
-        c_new = int( (self.core[1] + other.core[1]) / 2 )
-        # Create new island
-        isle_new = Island((r_new, c_new), g, generateFlag=False)
-        
-        # New coords are intersection of merged islands
-        isles[isle_new] = isles[self].union(isles[other])
-        # Update island reference for all new coords (not needed for every coord, but some)
-        for coord_pair in isles[isle_new]:
-            g.get_tile(coord_pair).set_island(isle_new)
-
-        # Set tiles
-        g.set(self.core, TileType.TEST)
-        g.get_tile(self.core).is_core = False
-
-        g.set(other.core, TileType.TEST)
-        g.get_tile(other.core).is_core = False
-
-        g.set(isle_new.core, TileType.CORE)
-
-        # Remove old island references so only merged remains
-        if self in isles:
-            del isles[self]
-        else:
-            print("[ERROR] self [%s] not in grid.islands" % self)
-        if other in isles:
-            del isles[other]
-        else:
-            print("[ERROR] other [%s] not in grid.islands" % other)
-        
-        print("[DEBUG: MERGE COUNT AFTER]")
-        g.tally()
-
-        print("[DEBUG: MERGE END]{")
-        print(self, end=" "); self.print()
-        print(other, end=" "); other.print()
-        print(isle_new, end=" "); isle_new.print()
-        print(g.islands)
-        print("}")
-
-        return isle_new.core
-    
-    def can_merge_with(self, other) -> bool:
-        ''' Test if two Islands are able to be merged together
-
-        This logic needs to be reworked. There may not be an intersection
-        Need to check neighbors. Perhaps reconsider how grid is represented
-        '''
-        if self == other:
-            print("[WARNING] Cannot merge an island with itself")
-            return False
-
-        assert(self.grid is other.grid)
-        g = self.grid
-        isles = g.islands
-
-        intersects = bool(isles[self].intersection(isles[other]))
-        if intersects: # simple case
-            print('[DEBUG] Simple case')
-            return True
-
-        for c in isles[self]: # Sick Big-O yo
-            for n in g.neighbors(c):
-                for d in isles[other]:
-                    if n == d:
-                        print('[DEBUG] Neighbors case')
-                        return True
-
-        return False
+        # self.grid.tally()
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
         ''' Go through neighbors of coord_pair and generate tiles'''
@@ -388,11 +339,84 @@ class Island:
                 if shore_flag:
                     g.set(n_coord_pair, TileType.SAND)
                 else:
-                    self.queue.append(n_coord_pair)
-                    g.islands[self].add(n_coord_pair)
+                    self.queue.append(n_coord_pair)                    
                     g.set(n_coord_pair, TileType.PLAINS)
 
+                g.islands[self].add(n_coord_pair)
                 g.get_tile(n_coord_pair).set_island(self)
+
+    def merge(self, other):
+        assert(self.grid is other.grid)
+        g = self.grid
+        isles = g.islands
+        
+        if self.queue or other.queue:
+            print("[ERROR] Cannot add Islands that are still generating")
+            return None
+        # TODO: Ensure it can't be an ocean tile
+        r_new = int( (self.core[0] + other.core[0]) / 2 )
+        c_new = int( (self.core[1] + other.core[1]) / 2 )
+        # Create new island
+        isle_new = Island((r_new, c_new), g, generateFlag=False)
+        union = isles[self].union(isles[other])
+        
+        return isle_new, union
+    
+    def can_merge_with(self, other) -> bool:
+        ''' Test if two Islands are able to be merged together
+
+        This logic needs to be reworked. There may not be an intersection
+        Need to check neighbors. Perhaps reconsider how grid is represented
+        '''
+        if self == other:
+            print("[WARNING] Cannot merge an island with itself")
+            return False
+
+        assert(self.grid is other.grid)
+        g = self.grid
+        isles = g.islands
+
+        intersects = bool(isles[self].intersection(isles[other]))
+        if intersects: # simple case
+            print('[DEBUG] Simple case')
+            return True
+
+        #   
+        debug_map = [["." for c in range(g.size)] for r in range(g.size)]
+        for coord in isles[self]:
+            r, c = coord
+            debug_map[r][c] = Fore.GREEN + "X" + Style.RESET_ALL
+        for coord in isles[other]:
+            r, c = coord
+            debug_map[r][c] = Fore.YELLOW + "Y" + Style.RESET_ALL
+        #
+
+        for self_coord in isles[self]: # Sick Big-O yo
+            for self_neighb in g.neighbors(self_coord):
+                if self_neighb in isles[other]:
+                    print('[DEBUG] Neighbors case')
+                    return True
+            #     for other_coord in isles[other]:
+            #         r_s, c_s = self_neighb
+            #         r_o, c_o = other_coord
+            #         debug_map[r_s][c_s] = Fore.RED + "A" + Style.RESET_ALL
+            #         debug_map[r_o][c_o] = Fore.CYAN + "B" + Style.RESET_ALL
+                    
+                    
+            #         if self_neighb == other_coord:
+            #             print('[DEBUG] Neighbors case')
+            #             return True
+            #         debug_map[r_s][c_s] = "X"
+            #         debug_map[r_o][c_o] = "Y"
+            # for row in debug_map:
+            #     for item in row:
+            #         print(item, end=" ")
+            #     print()
+            # input()
+
+        return False
+
+
 
     
 if __name__ == "__main__":
