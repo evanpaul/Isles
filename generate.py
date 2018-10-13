@@ -7,18 +7,15 @@ from enum import Enum, auto
 from typing import *
 from collections import defaultdict
 from pprint import pprint
-
 from colorama import Back, Fore, Style, init
 import uuid
 
 init()
-# TODO Fix merge connected islands: how are single numbers getting in the coords list?
-    # color each island one color 
-# REVIEW Having both islands.coords and grid.tiles is a bit clunky
-    # Grid.tiles is cleaner, but you have to search more
-    # Shift tile logic to... Tile i.e. detach coords from Islands/Grid.
-# TODO Make tundra and deserts: use poles and temperature probability gradients
+# TODO Fix core ending up in ocean: if core surrounded by ocean -> pick random point in g.islands[self]
+    # TODO Also maybe rename g.islands -> g.island_coords
 # TODO Add logging
+# TODO Make tundra and deserts: use poles and temperature probability gradients
+
 
 
 def weighted_random(choices: List[Any], probs: List[float]):
@@ -42,10 +39,10 @@ class TileType(Enum):
     PLAINS=1
     SAND=2
     MOUNTAINS=3
-    CORE=4
-    TEST=5
-    DEBUG=6
-    DEBUG2=7
+    TEST=4
+    DEBUG=5
+    DEBUG2=6
+    CORE=7
 
 
 class Tile:
@@ -106,17 +103,13 @@ class Grid:
             TileType.SAND.value: (Fore.YELLOW, "2"),
             TileType.MOUNTAINS.value: (Fore.WHITE, "3"),
             TileType.CORE.value: (Fore.RED, "C"),
-            TileType.TEST.value: (Fore.RED, "X"),
+            TileType.TEST.value: (Fore.RED, "4"),
             TileType.DEBUG.value: (Fore.BLACK, "&"),
-            TileType.DEBUG2.value: (Fore.CYAN, "?"),
-            8: (Fore.CYAN, "?"),
-            9: (Fore.CYAN, "?")
+            TileType.DEBUG2.value: (Fore.CYAN, "?")
         }
 
         for row in self.tiles:
             for tile in row:
-                # if tile.island:
-                #     tile.debug()
                 scheme = display_scheme[tile.type.value]
                 print(scheme[0] + scheme[1] + Style.RESET_ALL, end=" ")
             print()
@@ -148,15 +141,16 @@ class Grid:
         print("[DEBUG] Generating %d islands" % num)
         for _ in range(num):
             Island(self.get_random_loc(), self)
+            # REVIEW I cannot believe calling it twice fixes the bug
+            # Why? Because sometimes a merge would then create an eligible
+            # subsequent merge that would not be processed
 
-            # Check already generated islands to see if merges possible
-            # REVIEW Modifying list in for block is probably the issue here
-            i = 0
-            # print("*" * 10)
-            # pprint(self.islands)
-            # self.tally()
+            # TODO Make this more elegant. Perhaps something tracking the isles
+            # being processed outside of the scope of merge_islands() would allow
+            # us to loop through until we're done
             self.merge_islands()
-            # print("*" * 10)
+            print("[DEBUG] Second call")
+            self.merge_islands()
 
     def merge_islands(self):
         processed: Dict[Island, bool] = {isle: False for isle in self.islands}
@@ -164,7 +158,7 @@ class Grid:
         merged = []
         for isle1, isle2 in merge_queue:
             valid_merge = not processed[isle1] and not processed[isle2]
-            if isle1.can_merge_with(isle2) and valid_merge:
+            if valid_merge and isle1.can_merge_with(isle2):
                 new_isle, union = isle1.merge(isle2)
                 merged.append( (isle1, isle2, new_isle, union) )
                 print("[DEBUG] Merged: %s(%d,%d) + %s(%d,%d) -> %s(%d,%d)" % (
@@ -193,7 +187,6 @@ class Grid:
             self.get_tile(isl2.core).is_core = False
             del self.islands[isl2]
 
-            
         print("*" * 20)
         self.tally()
         print("." * 20)
@@ -252,23 +245,8 @@ class Grid:
         for t in itertools.chain(*self.tiles):
             if t.island and t.island not in self.islands:
                 print("[ERROR] t.island is not in list")
-                t.island.print()
-                print("=")
-                sys.exit()
-                for si in self.islands:
-                    si.print()
-                for j in self.neighbors(t.coord):
-                    self.set(j, TileType.DEBUG)
-                self.print()
-                # sys.exit()
             elif t.island and t.type is not TileType.OCEAN and not t.is_core:
-                tt = TileType(list(self.islands).index(t.island) + 1)
-                # print("tt:", tt)
-                t.set_type(tt)
-                #ValueError: <__main__.Island object at 0x10abfa128> is not in list
-            # elif not t.island:
-            #     print("?")
-
+                t.set_type(TileType(list(self.islands).index(t.island) + 1))
 
 class Island:
     # TODO Play around with different models
@@ -377,11 +355,11 @@ class Island:
         isles = g.islands
 
         intersects = bool(isles[self].intersection(isles[other]))
-        if intersects: # simple case
+        if intersects:
             print('[DEBUG] Simple case')
             return True
 
-        #   
+        ''' DEBUG
         debug_map = [["." for c in range(g.size)] for r in range(g.size)]
         for coord in isles[self]:
             r, c = coord
@@ -389,36 +367,30 @@ class Island:
         for coord in isles[other]:
             r, c = coord
             debug_map[r][c] = Fore.YELLOW + "Y" + Style.RESET_ALL
-        #
+        '''
 
         for self_coord in isles[self]: # Sick Big-O yo
             for self_neighb in g.neighbors(self_coord):
                 if self_neighb in isles[other]:
                     print('[DEBUG] Neighbors case')
                     return True
-            #     for other_coord in isles[other]:
-            #         r_s, c_s = self_neighb
-            #         r_o, c_o = other_coord
-            #         debug_map[r_s][c_s] = Fore.RED + "A" + Style.RESET_ALL
-            #         debug_map[r_o][c_o] = Fore.CYAN + "B" + Style.RESET_ALL
-                    
-                    
-            #         if self_neighb == other_coord:
-            #             print('[DEBUG] Neighbors case')
-            #             return True
-            #         debug_map[r_s][c_s] = "X"
-            #         debug_map[r_o][c_o] = "Y"
-            # for row in debug_map:
-            #     for item in row:
-            #         print(item, end=" ")
-            #     print()
-            # input()
+                # r_s, c_s = self_neighb
+                # if debug_map == Fore.YELLOW + "Y" + Style.RESET_ALL:
+                #     print("sus")
+                # debug_map[r_s][c_s] = Fore.RED + "X" + Style.RESET_ALL
+            
+
+        # out = ""   
+        # for row in debug_map:
+        #     for item in row:
+        #         out += item + " "
+        #     out += "\n"
+        # print(out)
+        # input()
 
         return False
 
 
-
-    
 if __name__ == "__main__":
     g = Grid(50)
     g.generate(num_islands=4, mountains=True, echo=True)
