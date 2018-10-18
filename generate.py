@@ -9,6 +9,7 @@ from collections import defaultdict
 from pprint import pprint
 from colorama import Back, Fore, Style, init
 import uuid
+import logging
 
 init()
 # TODO Fix core ending up in ocean: if core surrounded by ocean -> pick random point in g.islands[self]
@@ -22,10 +23,11 @@ def weighted_random(choices: List[Any], probs: List[float]):
     '''Weighted randomly choose an item from a list given respective probabilities'''
     s = int(sum(probs))
     if s != 1:
-        print("[WARNING] weighted_random(): probabilities should sum to 1.0, got: ", s)
+        logging.warning("probabilities should sum to 1.0, got: %d", s)
 
     if len(choices) != len(probs):
-        sys.exit("[ERROR] weighted_random(): must provide as many probalities as choices")
+        logging.error("must provide as many probalities as choices")
+        sys.exit()
 
     options: List[Any] = []
     for choice, prob in zip(choices, probs):
@@ -84,13 +86,16 @@ class Grid:
             g.print()
 
     def tally(self):
+        logging.debug("Tile tally:")
         counter = defaultdict(int)
+        # Flatten 2D grid and iterate through each tile
         for t in itertools.chain(*self.tiles):
             counter[t.island] += 1
         pprint(dict(counter))
 
 
     def tally2(self):
+        logging.debug("Islands tally:")
         counter = {}
         for isle in self.islands:
             counter[isle] = len(self.islands[isle])
@@ -138,7 +143,7 @@ class Grid:
         return self.tiles[r][c]
 
     def generate_islands(self, num=1) -> None:
-        print("[DEBUG] Generating %d islands" % num)
+        logging.debug("Generating %d islands" % num)
         for _ in range(num):
             Island(self.get_random_loc(), self)
             # REVIEW I cannot believe calling it twice fixes the bug
@@ -149,7 +154,7 @@ class Grid:
             # being processed outside of the scope of merge_islands() would allow
             # us to loop through until we're done
             self.merge_islands()
-            print("[DEBUG] Second call")
+            logging.debug("Second call")
             self.merge_islands()
 
     def merge_islands(self):
@@ -161,16 +166,17 @@ class Grid:
             if valid_merge and isle1.can_merge_with(isle2):
                 new_isle, union = isle1.merge(isle2)
                 merged.append( (isle1, isle2, new_isle, union) )
-                print("[DEBUG] Merged: %s(%d,%d) + %s(%d,%d) -> %s(%d,%d)" % (
+                logging.debug("Merged: %s(%d,%d) + %s(%d,%d) -> %s(%d,%d)",
                     isle1, *isle1.core, 
                     isle2, *isle2.core,
-                    new_isle, *new_isle.core)
+                    new_isle, *new_isle.core
                 )
+    
                 processed[isle1] = processed[isle2] = True
 
         
         if merged:
-            print("[DEBUG] Finalizing merge")
+            logging.debug("Finalizing merge")
         for quartet in merged:
             isl1, isl2, isl_new, union = quartet
 
@@ -187,16 +193,13 @@ class Grid:
             self.get_tile(isl2.core).is_core = False
             del self.islands[isl2]
 
-        print("*" * 20)
         self.tally()
-        print("." * 20)
         self.tally2()
-        print("*" * 20)
 
 
     def generate_mountains(self) -> None:
         if not self.islands:
-            print("[WARN] Use generate_islands() before generate_mountains()")
+            logging.warning("Use generate_islands() first")
             return
 
         for r, row in enumerate(self.tiles):
@@ -244,7 +247,7 @@ class Grid:
         '''
         for t in itertools.chain(*self.tiles):
             if t.island and t.island not in self.islands:
-                print("[ERROR] t.island is not in list")
+                logging.error("t.island is not in list") # REVIEW: sys.exit()?
             elif t.island and t.type is not TileType.OCEAN and not t.is_core:
                 t.set_type(TileType(list(self.islands).index(t.island) + 1))
 
@@ -279,7 +282,8 @@ class Island:
 
     def generate(self) -> None:
         if self.generated:
-            sys.exit("[ERROR] Island already generated")
+            logging.error("Island already generated")
+            sys.exit()
 
         self.setup_core()
         self.queue.append(self.core)
@@ -292,8 +296,8 @@ class Island:
             self.process_neighbors(target, ocean_prob)
 
         self.generated = True # Not particularly useful, just for debug
-        print("[DEBUG] Generation of %s(%d, %d) complete:" % (str(self), *self.core))
-        print("[DEBUG] => %d tiles" % len(self.grid.islands[self]))
+        logging.debug("Generation of %s(%d, %d) complete:", str(self), *self.core)
+        logging.debug("%d tiles generated", len(self.grid.islands[self]))
         # self.grid.tally()
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
@@ -329,7 +333,7 @@ class Island:
         isles = g.islands
         
         if self.queue or other.queue:
-            print("[ERROR] Cannot add Islands that are still generating")
+            logging.error("Cannot add Islands that are still generating")
             return None
         # TODO: Ensure it can't be an ocean tile
         r_new = int( (self.core[0] + other.core[0]) / 2 )
@@ -347,7 +351,7 @@ class Island:
         Need to check neighbors. Perhaps reconsider how grid is represented
         '''
         if self == other:
-            print("[WARNING] Cannot merge an island with itself")
+            logging.warning("Cannot merge an island with itself")
             return False
 
         assert(self.grid is other.grid)
@@ -356,7 +360,7 @@ class Island:
 
         intersects = bool(isles[self].intersection(isles[other]))
         if intersects:
-            print('[DEBUG] Simple case')
+            logging.debug('Simple case')
             return True
 
         ''' DEBUG
@@ -372,7 +376,7 @@ class Island:
         for self_coord in isles[self]: # Sick Big-O yo
             for self_neighb in g.neighbors(self_coord):
                 if self_neighb in isles[other]:
-                    print('[DEBUG] Neighbors case')
+                    logging.debug('Neighbors case')
                     return True
                 # r_s, c_s = self_neighb
                 # if debug_map == Fore.YELLOW + "Y" + Style.RESET_ALL:
@@ -390,7 +394,9 @@ class Island:
 
         return False
 
-
 if __name__ == "__main__":
+    formatter = "[%(levelname)s:%(lineno)s:%(funcName)s] - %(message)s"
+    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=formatter)
+
     g = Grid(50)
     g.generate(num_islands=4, mountains=True, echo=True)
