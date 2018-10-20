@@ -14,7 +14,6 @@ import logging
 init()
 # TODO Fix core ending up in ocean: if core surrounded by ocean -> pick random point in g.islands[self]
     # TODO Also maybe rename g.islands -> g.island_coords
-# TODO Add logging
 # TODO Make tundra and deserts: use poles and temperature probability gradients
 
 
@@ -80,26 +79,44 @@ class Grid:
             g.generate_mountains()
         if echo:
             g.print()
-            input()
             print()
             g.debug_label_islands()
             g.print()
 
-    def tally(self):
+    def debug_tally(self):
+        tile_tally = self.tally_tile()
+        isle_tally = self.tally_island()
+
+        pprint(tile_tally)
+        pprint(isle_tally)  
+
+        del tile_tally["OCEAN"]
+
+        if tile_tally != isle_tally:
+            self.print()
+            logging.error("Tile and island tallies are not equal")
+            sys.exit()
+        
+    def tally_tile(self):
         logging.debug("Tile tally:")
         counter = defaultdict(int)
         # Flatten 2D grid and iterate through each tile
         for t in itertools.chain(*self.tiles):
-            counter[t.island] += 1
-        pprint(dict(counter))
+            if t.island:
+                counter[t.island] += 1
+            else:
+                counter["OCEAN"] += 1
+
+        return dict(counter)
 
 
-    def tally2(self):
+    def tally_island(self):
         logging.debug("Islands tally:")
         counter = {}
         for isle in self.islands:
             counter[isle] = len(self.islands[isle])
-        pprint(counter)
+
+        return counter
 
     def print(self) -> None:
         display_scheme = {
@@ -161,6 +178,7 @@ class Grid:
         processed: Dict[Island, bool] = {isle: False for isle in self.islands}
         merge_queue = list(itertools.combinations(self.islands, 2))
         merged = []
+
         for isle1, isle2 in merge_queue:
             valid_merge = not processed[isle1] and not processed[isle2]
             if valid_merge and isle1.can_merge_with(isle2):
@@ -173,7 +191,6 @@ class Grid:
                 )
     
                 processed[isle1] = processed[isle2] = True
-
         
         if merged:
             logging.debug("Finalizing merge")
@@ -193,8 +210,7 @@ class Grid:
             self.get_tile(isl2.core).is_core = False
             del self.islands[isl2]
 
-        self.tally()
-        self.tally2()
+        self.debug_tally()
 
 
     def generate_mountains(self) -> None:
@@ -298,7 +314,6 @@ class Island:
         self.generated = True # Not particularly useful, just for debug
         logging.debug("Generation of %s(%d, %d) complete:", str(self), *self.core)
         logging.debug("%d tiles generated", len(self.grid.islands[self]))
-        # self.grid.tally()
 
     def process_neighbors(self, coord_pair, ocean_prob) -> None:
         ''' Go through neighbors of coord_pair and generate tiles'''
@@ -336,11 +351,20 @@ class Island:
             logging.error("Cannot add Islands that are still generating")
             return None
         # TODO: Ensure it can't be an ocean tile
+        union = isles[self].union(isles[other])
         r_new = int( (self.core[0] + other.core[0]) / 2 )
         c_new = int( (self.core[1] + other.core[1]) / 2 )
+
+        # Check if tile is surrounded by ocean, if so choose random from set
+        neighb_sum = sum([g.get_tile(n).type.value for n in g.neighbors((r_new, c_new))])
+        # logging.debug("Neigbhor sum: %d", neighb_sum)
+        if not neighb_sum: # REVIEW
+            logging.debug("%s surrounded by ocean, choosing new core", (r_new, c_new))
+            r_new, c_new = random.choice(list(union))
+
         # Create new island
         isle_new = Island((r_new, c_new), g, generateFlag=False)
-        union = isles[self].union(isles[other])
+        
         
         return isle_new, union
     
@@ -397,6 +421,7 @@ class Island:
 if __name__ == "__main__":
     formatter = "[%(levelname)s:%(lineno)s:%(funcName)s] - %(message)s"
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format=formatter)
-
-    g = Grid(50)
-    g.generate(num_islands=4, mountains=True, echo=True)
+    while True:
+        g = Grid(50)
+        g.generate(num_islands=4, mountains=True, echo=True)
+        input()
